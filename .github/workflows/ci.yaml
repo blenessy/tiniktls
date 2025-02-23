@@ -1,0 +1,32 @@
+
+name: Continuous Integration
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Build the tiniktls-docker images
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile.builder
+          tags: tiniktls-builder:latest
+
+      - name: Build the tiniktls-qa images
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile.qa
+          tags: tiniktls-qa:latest
+
+      - name: Run the Tests
+        run: docker run --rm -v "$PWD:/tiniktls" tiniktls-qa:latest
