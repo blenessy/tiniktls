@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -14,7 +15,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <limits.h>
+#include <libgen.h>
 
+#include "ktls.h"
 #include "tiniConfig.h"
 #include "tiniLicense.h"
 
@@ -109,9 +113,9 @@ static unsigned int subreaper = 0;
 static unsigned int parent_death_signal = 0;
 static unsigned int kill_process_group = 0;
 
-static unsigned int warn_on_reap = 0;
+#define DEFAULT_POLL_PERIOD_MILLIS 1000
 
-static struct timespec ts = { .tv_sec = 1, .tv_nsec = 0 };
+static unsigned int warn_on_reap = 0;
 
 static const char reaper_warning[] = "Tini is not running as PID 1 "
 #if HAS_SUBREAPER
@@ -178,27 +182,45 @@ int isolate_child(void) {
 }
 
 
-int spawn(const signal_configuration_t* const sigconf_ptr, char* const argv[], int* const child_pid_ptr) {
+int spawn(const signal_configuration_t* const sigconf_ptr, char* const argv[], int* const child_pid_ptr, int* const child_sock_ptr) {
 	pid_t pid;
 
 	// TODO: check if tini was a foreground process to begin with (it's not OK to "steal" the foreground!")
 
+	// Create an unix domain socket pair for passing established (ktls) connections to the child.
+	int sock_fds[2] = { -1, -1 };
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sock_fds)) {
+		PRINT_FATAL("socketpair failed: %s", strerror(errno));
+		return 1;
+	}
+
 	pid = fork();
 	if (pid < 0) {
 		PRINT_FATAL("fork failed: %s", strerror(errno));
+		close(sock_fds[0]);
+		close(sock_fds[1]);
 		return 1;
 	} else if (pid == 0) {
-
+		close(sock_fds[0]);
 		// Put the child in a process group and make it the foreground process if there is a tty.
 		if (isolate_child()) {
+			close(sock_fds[1]);
 			return 1;
 		}
 
 		// Restore all signal handlers to the way they were before we touched them.
 		if (restore_signals(sigconf_ptr)) {
+			close(sock_fds[1]);
 			return 1;
 		}
 
+		if (sizeof(int) > 8) {
+			PRINT_FATAL("unsupported CPU arch");
+			return 1;
+		}
+		char fd64str[21] = { 0 };  // fits 64-bit int with sign and null terminator
+		sprintf(fd64str, "%d", sock_fds[1]);
+		setenv("TINIKTLS_FD", fd64str, 1);
 		execvp(argv[0], argv);
 
 		// execvp will only return on an error so make sure that we check the errno
@@ -214,11 +236,14 @@ int spawn(const signal_configuration_t* const sigconf_ptr, char* const argv[], i
 				break;
 		}
 		PRINT_FATAL("exec %s failed: %s", argv[0], strerror(errno));
+		close(sock_fds[1]);
 		return status;
 	} else {
+		close(sock_fds[1]);
 		// Parent
 		PRINT_INFO("Spawned child process '%s' with pid '%i'", argv[0], pid);
 		*child_pid_ptr = pid;
+		*child_sock_ptr = sock_fds[0];
 		return 0;
 	}
 }
@@ -498,7 +523,7 @@ int configure_signals(sigset_t* const parent_sigset_ptr, const signal_configurat
 	return 0;
 }
 
-int wait_and_forward_signal(sigset_t const* const parent_sigset_ptr, pid_t const child_pid) {
+int check_and_forward_signal(sigset_t const* const parent_sigset_ptr, pid_t const child_pid, struct timespec ts) {
 	siginfo_t sig;
 
 	if (sigtimedwait(parent_sigset_ptr, &sig, &ts) == -1) {
@@ -656,15 +681,39 @@ int main(int argc, char *argv[]) {
 	reaper_check();
 
 	/* Go on */
-	int spawn_ret = spawn(&child_sigconf, *child_args_ptr, &child_pid);
+	int child_sock = -1;
+	// check_and_forward_signal will not block while ktls_serve is working
+	static struct timespec ts = { .tv_sec = 0 };  
+	int spawn_ret = spawn(&child_sigconf, *child_args_ptr, &child_pid, &child_sock);
 	if (spawn_ret) {
 		return spawn_ret;
 	}
 	free(child_args_ptr);
 
+	/* Set poll_period_millis from ENV (unofficial tweak). */
+	time_t poll_period_millis = DEFAULT_POLL_PERIOD_MILLIS;
+	if (getenv("TINI_POLL_PERIOD_MILLIS") != NULL) {
+		long millis = strtol(getenv("TINI_POLL_PERIOD_MILLIS"), NULL, 10);
+		if (millis < 0 || millis > INT_MAX) {
+			fprintf(stderr, "TINI_POLL_PERIOD_MILLIS value is invalid: %ld\n", millis);
+			return 1;
+		}
+		poll_period_millis = (time_t)millis;
+	}
+
+	/* Create unix domain socket and put it in listening mode. */
+	if (ktls_global_init(child_sock, poll_period_millis, verbosity)) {
+		return 1;
+	}
+
 	while (1) {
+		/*  */
+		if (ktls_serve()) {
+			// check_and_forward_signal will wait from now on
+			return 1;
+		}
 		/* Wait for one signal, and forward it */
-		if (wait_and_forward_signal(&parent_sigset, child_pid)) {
+		if (check_and_forward_signal(&parent_sigset, child_pid, ts)) {
 			return 1;
 		}
 

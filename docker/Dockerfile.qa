@@ -1,0 +1,7 @@
+FROM tiniktls-builder
+
+RUN apk --no-cache add clang-extra-tools python3
+
+ADD qa.sh /opt/
+
+CMD ["/opt/qa.sh"]

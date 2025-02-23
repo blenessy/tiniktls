@@ -1,10 +1,24 @@
-cmake_minimum_required (VERSION 2.8.12)
+cmake_minimum_required (VERSION 3.18)
 project (tini C)
 
 # Config
 set (tini_VERSION_MAJOR 0)
-set (tini_VERSION_MINOR 19)
+set (tini_VERSION_MINOR 1)
 set (tini_VERSION_PATCH 0)
+
+#set (OPENSSL_ROOT_DIR openssl)
+set (OPENSSL_USE_STATIC_LIBS TRUE)
+#set (ZLIB_USE_STATIC_LIBS TRUE)
+
+# workaround for finding ZLIB::ZLIB
+#find_package(PkgConfig REQUIRED)
+#execute_process(
+#  COMMAND ${PKG_CONFIG_EXECUTABLE} --variable=libdir zlib
+#  OUTPUT_VARIABLE ZLIB_ROOT
+#  OUTPUT_STRIP_TRAILING_WHITESPACE
+#)
+#find_package(ZLIB REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # Build options
 option(MINIMAL "Disable argument parsing and verbose output" OFF)
@@ -65,28 +79,23 @@ configure_file (
 )
 
 configure_file (
-	"${PROJECT_SOURCE_DIR}/tpl/README.md.in"
-	"${PROJECT_SOURCE_DIR}/README.md"
-	@ONLY
-)
-
-configure_file (
 	"${PROJECT_SOURCE_DIR}/tpl/VERSION.in"
 	"${PROJECT_BINARY_DIR}/VERSION"
 	@ONLY
 )
 
-
 include_directories ("${PROJECT_BINARY_DIR}")
 
-add_executable (tini src/tini.c)
+#add_executable (tini src/tini.c src/ktls.c)
+#target_link_libraries(tini OpenSSL::SSL)
 
-add_executable (tini-static src/tini.c)
-set_target_properties (tini-static PROPERTIES LINK_FLAGS "-Wl,--no-export-dynamic -static")
+add_executable (tiniktls src/tini.c src/ktls.c)
+target_link_libraries(tiniktls OpenSSL::SSL)
+set_target_properties (tiniktls PROPERTIES LINK_FLAGS "-Wl,--no-export-dynamic -static")
 
 # Installation
-install (TARGETS tini DESTINATION bin)
-install (TARGETS tini-static DESTINATION bin)
+#install (TARGETS tini DESTINATION bin)
+install (TARGETS tiniktls DESTINATION bin)
 
 # Packaging
 include (InstallRequiredSystemLibraries)
