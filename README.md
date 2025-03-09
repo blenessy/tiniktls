@@ -58,7 +58,13 @@ You can build it with docker:
 docker build -t tiniktls-builder -f docker/Dockerfile.builder docker
 ```
 
-Run the `tiniktls-builder` to produce the `tiniktls-static` binary:
+During development build `tiniktls` and update `SHA256SUMS` with:
+
+```shell
+docker run --rm -it -v "$PWD:/tiniktls" -e SHA256SUMS=update tiniktls-builder
+```
+
+If you want to build `tiniktls` and check that it matches the hash in `SHA256SUMS`:
 
 ```shell
 docker run --rm -it -v "$PWD:/tiniktls" tiniktls-builder
