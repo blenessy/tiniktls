@@ -3,7 +3,8 @@ FROM alpine:3.21
 RUN apk --no-cache add musl-dev gcc make perl linux-headers cmake curl
 
 COPY musl.cmake /opt/musl.cmake
-ENV CMAKE_TOOLCHAIN_FILE=/opt/musl.cmake
+ENV CMAKE_TOOLCHAIN_FILE=/opt/musl.cmake \
+    SOURCE_DATE_EPOCH=0
 
 # download and build openssl
 WORKDIR /opt/openssl
@@ -13,7 +14,7 @@ RUN curl -fsL --tlsv1.3 https://github.com/openssl/openssl/archive/refs/tags/ope
     rm openssl.tgz
 
 # NOTE: no-asm makes it a lot smaller but also a lot slower (no free lunch)
-RUN ./Configure enable-ktls no-docs no-tests no-shared no-afalgeng no-async no-capieng no-cmp no-cms \
+RUN ./Configure enable-ktls no-apps no-docs no-tests no-shared no-afalgeng no-async no-capieng no-cmp no-cms \
     no-comp no-ct no-dgram no-dso no-dynamic-engine no-engine no-filenames no-gost no-http no-legacy \
     no-module no-nextprotoneg no-ocsp no-padlockeng no-quic no-srp no-srtp no-ssl-trace no-thread-pool \
     no-ts no-ui-console no-uplink no-ssl3-method no-tls1-method no-tls1_1-method no-dtls1-method \

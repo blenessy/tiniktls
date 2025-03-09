@@ -2,11 +2,10 @@
 
 set -ex
 
+test -e build/tiniktls
+
 owner=$(stat -c '%u:%g' .)
 trap 'chown -R ${owner:?} src' EXIT
-
-echo "=== Building ==="
-/opt/build.sh
 
 echo "=== Testing ==="
 TINIKTLS_CA_CHAIN=test/certs/ca-chain.pem build/tiniktls -- python3 test/ktls_tests.py

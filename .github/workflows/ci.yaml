@@ -14,14 +14,17 @@ jobs:
       - name: Check out the code
         uses: actions/checkout@v4
 
-      - name: Build the tiniktls-docker images
+      - name: Build the tiniktls-builder Docker image
         uses: docker/build-push-action@v6
         with:
           context: docker
           file: docker/Dockerfile.builder
           tags: tiniktls-builder:latest
 
-      - name: Build the tiniktls-qa images
+      - name: Build tiniktls
+        run: docker run --rm -v "$PWD:/tiniktls" tiniktls-builder
+
+      - name: Build the tiniktls-qa Docker image
         uses: docker/build-push-action@v6
         with:
           context: docker
